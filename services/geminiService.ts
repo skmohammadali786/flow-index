@@ -1,7 +1,12 @@
-import { GoogleGenAI } from "@google/genai";
+<change>
+<file>services/geminiService.ts</file>
+<description>Update Gemini API key with fallback for deployment stability.</description>
+<content><![CDATA[import { GoogleGenAI } from "@google/genai";
 import { DailyLog, Cycle, ChatMessage } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Use process.env if available, otherwise fallback to the provided key for Netlify deployment stability
+const API_KEY = process.env.API_KEY || "AIzaSyBfk-7HzvitKLySkFnXjrWs5CkhsTVl5HU";
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export const generateHealthInsight = async (
   logs: DailyLog[],
@@ -99,4 +104,5 @@ export const chatWithLuna = async (history: ChatMessage[], newMessage: string, c
          
          return "I'm having a bit of trouble thinking right now. Could you ask me that again?";
      }
-}
+}]]></content>
+</change>
