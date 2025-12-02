@@ -6,23 +6,22 @@ import { TrendingUp, Activity, Droplet, Moon, Weight, Thermometer } from 'lucide
 interface AnalysisViewProps {
   logs: DailyLog[];
   cycles: Cycle[];
-  onNavigateToLog?: () => void; // Optional prop to redirect if empty
+  onNavigateToLog?: () => void;
 }
 
 type MetricType = 'water' | 'sleep' | 'weight' | 'temperature';
 
 const METRICS: { id: MetricType; icon: React.ElementType; label: string; unit: string; color: string }[] = [
-  { id: 'weight', icon: Weight, label: 'Weight', unit: 'kg', color: '#10b981' }, // emerald
-  { id: 'sleep', icon: Moon, label: 'Sleep', unit: 'hrs', color: '#6366f1' }, // indigo
-  { id: 'water', icon: Droplet, label: 'Water', unit: 'cups', color: '#3b82f6' }, // blue
-  { id: 'temperature', icon: Thermometer, label: 'Temp', unit: '°', color: '#f97316' }, // orange
+  { id: 'weight', icon: Weight, label: 'Weight', unit: 'kg', color: '#10b981' }, 
+  { id: 'sleep', icon: Moon, label: 'Sleep', unit: 'hrs', color: '#6366f1' }, 
+  { id: 'water', icon: Droplet, label: 'Water', unit: 'cups', color: '#3b82f6' }, 
+  { id: 'temperature', icon: Thermometer, label: 'Temp', unit: '°', color: '#f97316' }, 
 ];
 
 export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavigateToLog }) => {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>('weight');
   const [focusedPoint, setFocusedPoint] = useState<{x: number, y: number, value: number, date: string} | null>(null);
 
-  // Auto-select a metric that has data on mount
   useEffect(() => {
     for (const m of METRICS) {
       const hasData = logs.some(l => l[m.id] !== undefined && l[m.id] !== null && !isNaN(l[m.id] as number) && (l[m.id] as number) > 0);
@@ -31,22 +30,23 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
         return;
       }
     }
-  }, [logs.length]); // Run once when logs load
+  }, [logs.length]); 
 
   // --- Cycle History Calculations ---
   const cycleData = useMemo(() => {
-    // Take last 6 cycles, reverse to show oldest to newest left-to-right
-    const recent = [...cycles].slice(0, 6).reverse();
-    const maxLen = Math.max(...recent.map(c => c.length), 35); // Scale max
+    const recent = [...cycles]
+        .filter(c => c.length > 0) // Ensure valid length
+        .slice(0, 6)
+        .reverse(); // Oldest to newest for graph left-to-right
+        
+    const maxLen = Math.max(...recent.map(c => c.length), 35); 
     return { recent, maxLen };
   }, [cycles]);
 
   // --- Trend Data Calculations ---
   const trendData = useMemo(() => {
-    // Sort logs by date ascending
     const sortedLogs = [...logs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
-    // Filter last 14 entries (2 weeks) that have values for the selected metric
     const dataPoints = sortedLogs
         .filter(l => l[selectedMetric] !== undefined && l[selectedMetric] !== null && !isNaN(l[selectedMetric] as number))
         .slice(-14)
@@ -57,29 +57,25 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
     const values = dataPoints.map(d => d.value);
     const min = Math.min(...values);
     const max = Math.max(...values);
-    // Ensure range is at least 1 to avoid division by zero if all values are same
-    // Add some padding to min/max so points aren't on the very edge
     const range = (max - min) === 0 ? 1 : max - min; 
     const avg = values.reduce((a, b) => a + b, 0) / values.length;
 
     return { dataPoints, min, max, range, avg };
   }, [logs, selectedMetric]);
 
-  // --- Symptom Frequency Calculations ---
+  // --- Symptom Frequency ---
   const symptomStats = useMemo(() => {
     const counts: Record<string, number> = {};
     logs.forEach(log => {
       log.symptoms.forEach(s => counts[s] = (counts[s] || 0) + 1);
     });
-    // Sort by count desc
     return Object.entries(counts)
       .sort(([, a], [, b]) => b - a)
-      .slice(0, 5); // Top 5
+      .slice(0, 5); 
   }, [logs]);
 
   const activeMetricInfo = METRICS.find(m => m.id === selectedMetric)!;
 
-  // Render Logic for Chart
   const renderChart = () => {
     if (!trendData || trendData.dataPoints.length === 0) {
         return (
@@ -89,6 +85,14 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
                 </div>
                 <p className="text-sm font-bold text-gray-500 dark:text-gray-400">No {activeMetricInfo.label} data yet</p>
                 <p className="text-xs text-gray-400 dark:text-gray-600 mb-4">Log your daily stats to see trends</p>
+                {onNavigateToLog && (
+                    <button 
+                        onClick={onNavigateToLog} 
+                        className="px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 rounded-lg text-xs font-bold hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
+                    >
+                        Log {activeMetricInfo.label}
+                    </button>
+                )}
             </div>
         );
     }
@@ -101,7 +105,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
     const drawWidth = width - (paddingX * 2);
     const drawHeight = height - (paddingY * 2);
 
-    // Calculate Coordinates
     const points = dataPoints.map((pt, i) => {
         let x;
         if (dataPoints.length === 1) {
@@ -115,16 +118,13 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
         return { x, y, ...pt };
     });
 
-    // Generate Path
     let d = "";
     if (points.length === 1) {
-        // Draw a small horizontal line if only one point
         d = `M ${points[0].x - 20},${points[0].y} L ${points[0].x + 20},${points[0].y}`;
     } else {
         d = `M ${points.map(p => `${p.x},${p.y}`).join(' L ')}`;
     }
     
-    // Fill Area Path (for gradient)
     const fillD = points.length > 1 
         ? `${d} L ${points[points.length-1].x},${height} L ${points[0].x},${height} Z`
         : "";
@@ -139,18 +139,14 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
                     </linearGradient>
                  </defs>
 
-                 {/* Grid Lines */}
                  <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="currentColor" className="text-gray-100 dark:text-gray-700" strokeWidth="2" />
                  <line x1={paddingX} y1={paddingY} x2={width - paddingX} y2={paddingY} stroke="currentColor" className="text-gray-100 dark:text-gray-700" strokeWidth="2" strokeDasharray="4 4"/>
 
-                 {/* Min/Max Labels */}
                  <text x={10} y={height - paddingY} className="text-xs fill-gray-400 dark:fill-gray-500 font-medium" alignmentBaseline="middle">{min}</text>
                  <text x={10} y={paddingY} className="text-xs fill-gray-400 dark:fill-gray-500 font-medium" alignmentBaseline="middle">{trendData.max}</text>
 
-                 {/* Gradient Fill */}
                  {fillD && <path d={fillD} fill={`url(#grad-${selectedMetric})`} stroke="none" />}
 
-                 {/* Line */}
                  <path
                     d={d} 
                     fill="none"
@@ -160,12 +156,9 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
                     strokeLinejoin="round"
                  />
 
-                 {/* Data Points */}
                  {points.map((p, i) => (
                      <g key={i} onClick={() => setFocusedPoint(p)}>
-                        {/* Invisible larger hit area for mobile tapping */}
                         <circle cx={p.x} cy={p.y} r="20" fill="transparent" className="cursor-pointer" />
-                        {/* Visible dot */}
                         <circle 
                             cx={p.x} 
                             cy={p.y} 
@@ -179,7 +172,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
                  ))}
              </svg>
              
-             {/* Tooltip Overlay */}
              {focusedPoint && (
                  <div 
                     className="absolute bg-gray-900 dark:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-xl transform -translate-x-1/2 transition-all pointer-events-none z-10"
@@ -189,7 +181,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
                          <span>{focusedPoint.value} {activeMetricInfo.unit}</span>
                          <span className="text-[10px] text-gray-400 font-medium">{new Date(focusedPoint.date).toLocaleDateString(undefined, {month:'short', day:'numeric'})}</span>
                      </div>
-                     {/* Triangle arrow */}
                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
                  </div>
              )}
@@ -213,7 +204,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
         {cycleData.recent.length > 0 ? (
             <div className="h-48 flex items-end justify-between space-x-2 md:space-x-4">
             {cycleData.recent.map((cycle, i) => {
-                const heightPercent = (cycle.length / cycleData.maxLen) * 100;
+                const heightPercent = Math.min((cycle.length / cycleData.maxLen) * 100, 100);
                 const isNormal = cycle.length >= 21 && cycle.length <= 35;
                 const dateLabel = new Date(cycle.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
                 
@@ -271,7 +262,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
             </div>
          </div>
 
-         {/* The Chart Component */}
          {renderChart()}
 
          {trendData && (
@@ -323,7 +313,10 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
               }) : (
                   <div className="text-center py-8">
                       <p className="text-gray-400 dark:text-gray-500 text-sm italic mb-4">No symptoms logged yet.</p>
-                      <button className="px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-lg text-xs font-bold transition-colors">
+                      <button 
+                        onClick={onNavigateToLog}
+                        className="px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-lg text-xs font-bold transition-colors"
+                      >
                           Log Today's Symptoms
                       </button>
                   </div>

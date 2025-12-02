@@ -4,7 +4,7 @@ import { getDatabase } from "firebase/database";
 import { getAnalytics } from "firebase/analytics";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDI-NqV5L3_SmCi00hrON7UB0mLcW7q5yU",
+  apiKey: "AIzaSyBfk-7HzvitKLySkFnXjrWs5CkhsTVl5HU",
   authDomain: "flow-index.firebaseapp.com",
   databaseURL: "https://flow-index-default-rtdb.firebaseio.com",
   projectId: "flow-index",

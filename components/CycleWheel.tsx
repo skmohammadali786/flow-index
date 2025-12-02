@@ -25,8 +25,15 @@ export const CycleWheel: React.FC<CycleWheelProps> = ({ latestCycle, settings, c
   const periodLen = settings.avgPeriodLength || 5;
   
   // Calculate day of cycle (1-based)
+  // Ensure we compare local dates (midnight to midnight)
   const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const startMidnight = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  
+  // Parse startDate carefully to avoid timezone shifts
+  const [startYear, startMonth, startDay] = latestCycle.startDate 
+      ? latestCycle.startDate.split('-').map(Number) 
+      : [today.getFullYear(), today.getMonth() + 1, today.getDate()];
+      
+  const startMidnight = new Date(startYear, startMonth - 1, startDay);
   
   const diffTime = todayMidnight.getTime() - startMidnight.getTime();
   const daysDiff = Math.floor(diffTime / (1000 * 60 * 60 * 24));
@@ -42,7 +49,7 @@ export const CycleWheel: React.FC<CycleWheelProps> = ({ latestCycle, settings, c
   const normalizedRadius = radius - stroke * 2;
   const circumference = normalizedRadius * 2 * Math.PI;
   
-  // Clamp progress
+  // Clamp progress (0 to 1)
   const progress = isFuture ? 0 : Math.min(cycleDay / cycleLen, 1);
   const strokeDashoffset = circumference - progress * circumference;
 

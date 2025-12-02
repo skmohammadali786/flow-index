@@ -1,7 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 import { DailyLog, Cycle, ChatMessage } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Use process.env if available, otherwise fallback to the provided key for Netlify deployment stability
+const API_KEY = process.env.API_KEY || "AIzaSyBfk-7HzvitKLySkFnXjrWs5CkhsTVl5HU";
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export const generateHealthInsight = async (
   logs: DailyLog[],

@@ -1,4 +1,6 @@
 
+import { DailyLog, Cycle } from '../types';
+
 export const formatDateISO = (date: Date): string => {
   const offset = date.getTimezoneOffset();
   const adjustedDate = new Date(date.getTime() - (offset * 60 * 1000));
@@ -93,17 +95,16 @@ export const getCycleRegularity = (cycles: SimpleCycle[]): number => {
 
 // --- Dynamic Cycle Analysis ---
 
-import { DailyLog, Cycle } from '../types';
-
 /**
  * Scans all daily logs to automatically identify cycles.
  * Logic:
- * - A period Start Date is a day with flow where the previous day did NOT have flow.
- * - If there is a gap of > 10 days between flow days, it is considered a new cycle.
- * - This handles cases where a user might log "Spotting" (ignored) vs "Light/Medium/Heavy".
+ * - Sorts all logs by date.
+ * - Identifies "Period Clusters": consecutive or near-consecutive (gap <= 7 days) flow days.
+ * - The first day of a cluster is the Cycle Start Date.
+ * - The cycle length is determined by the distance to the *next* Cycle Start Date.
  */
 export const analyzeCyclesFromLogs = (logs: DailyLog[], defaultCycleLen: number): Cycle[] => {
-    // 1. Filter logs that have Period Flow (exclude Spotting if desired)
+    // 1. Get all logs with confirmed flow, sorted oldest to newest
     const flowLogs = logs
         .filter(l => l.flow && l.flow !== 'Spotting')
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -111,40 +112,50 @@ export const analyzeCyclesFromLogs = (logs: DailyLog[], defaultCycleLen: number)
     if (flowLogs.length === 0) return [];
 
     const cycles: Cycle[] = [];
-    let currentPeriodStart = new Date(flowLogs[0].date);
-    let lastFlowDate = new Date(flowLogs[0].date);
+    
+    // Start with the very first log
+    let currentCycleStart = new Date(flowLogs[0].date);
+    let lastFlowLogDate = new Date(flowLogs[0].date);
 
-    // 2. Iterate and Group
     for (let i = 1; i < flowLogs.length; i++) {
         const currentLogDate = new Date(flowLogs[i].date);
-        const diff = (currentLogDate.getTime() - lastFlowDate.getTime()) / (1000 * 3600 * 24);
+        const diffDays = (currentLogDate.getTime() - lastFlowLogDate.getTime()) / (1000 * 3600 * 24);
 
-        // If gap is large (e.g., > 10 days), the previous period ended, and this is a new one.
-        if (diff > 10) {
-            // Close previous cycle
-            // Length = diff days between START of prev and START of this
-            const cycleLen = Math.ceil((currentLogDate.getTime() - currentPeriodStart.getTime()) / (1000 * 3600 * 24));
+        // If the gap between this flow day and the last flow day is large (e.g., > 7 days),
+        // it means the previous period finished and this is the start of a NEW cycle.
+        if (diffDays > 7) {
+            // Close the previous cycle
+            // Length = diff between THIS cycle start and the PREVIOUS cycle start
+            const prevCycleStartISO = formatDateISO(currentCycleStart);
+            const thisCycleStartISO = formatDateISO(currentLogDate);
             
-            // Add the previous cycle to list
+            // Calculate length of the cycle that just finished
+            const cycleLength = diffDaysBetween(prevCycleStartISO, thisCycleStartISO);
+
             cycles.push({
-                startDate: formatDateISO(currentPeriodStart),
-                length: cycleLen
+                startDate: prevCycleStartISO,
+                length: cycleLength
             });
 
-            // Reset trackers for new cycle
-            currentPeriodStart = currentLogDate;
+            // Set up for the new cycle
+            currentCycleStart = currentLogDate;
         }
         
-        lastFlowDate = currentLogDate;
+        lastFlowLogDate = currentLogDate;
     }
 
-    // 3. Handle the Current (Active) Cycle
-    // It has no end date yet, so we use a projected length
+    // Handle the final/current cycle
+    // It hasn't finished yet, so we don't know the true length.
+    // We store it with the default length, which the UI will override with "Smart Prediction".
     cycles.push({
-        startDate: formatDateISO(currentPeriodStart),
+        startDate: formatDateISO(currentCycleStart),
         length: defaultCycleLen 
     });
 
-    // Return sorted newest first
+    // Return newest first (reverse chronological order)
     return cycles.reverse();
+};
+
+const diffDaysBetween = (d1: string, d2: string) => {
+    return Math.floor((new Date(d2).getTime() - new Date(d1).getTime()) / (1000 * 3600 * 24));
 };
