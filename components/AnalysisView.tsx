@@ -34,17 +34,20 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
 
   // --- Cycle History Calculations ---
   const cycleData = useMemo(() => {
+    if (!cycles || cycles.length === 0) return { recent: [], maxLen: 35 };
+
     const recent = [...cycles]
-        .filter(c => c.length > 0) // Ensure valid length
+        .filter(c => c && c.length > 0) // Ensure valid length and object
         .slice(0, 6)
         .reverse(); // Oldest to newest for graph left-to-right
         
-    const maxLen = Math.max(...recent.map(c => c.length), 35); 
+    const maxLen = recent.length > 0 ? Math.max(...recent.map(c => c.length), 35) : 35; 
     return { recent, maxLen };
   }, [cycles]);
 
   // --- Trend Data Calculations ---
   const trendData = useMemo(() => {
+    if (!logs) return null;
     const sortedLogs = [...logs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     const dataPoints = sortedLogs
@@ -66,9 +69,13 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
   // --- Symptom Frequency ---
   const symptomStats = useMemo(() => {
     const counts: Record<string, number> = {};
-    logs.forEach(log => {
-      log.symptoms.forEach(s => counts[s] = (counts[s] || 0) + 1);
-    });
+    if (logs) {
+        logs.forEach(log => {
+            if (log.symptoms) {
+                log.symptoms.forEach(s => counts[s] = (counts[s] || 0) + 1);
+            }
+        });
+    }
     return Object.entries(counts)
       .sort(([, a], [, b]) => b - a)
       .slice(0, 5); 
@@ -158,7 +165,10 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
 
                  {points.map((p, i) => (
                      <g key={i} onClick={() => setFocusedPoint(p)}>
-                        <circle cx={p.x} cy={p.y} r="20" fill="transparent" className="cursor-pointer" />
+                        {/* Hitbox: Transparent rectangle for easier clicking */}
+                        <rect x={p.x - 20} y={0} width={40} height={height} fill="transparent" className="cursor-pointer" />
+                        
+                        {/* Visible Point */}
                         <circle 
                             cx={p.x} 
                             cy={p.y} 
@@ -172,18 +182,35 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ logs, cycles, onNavi
                  ))}
              </svg>
              
-             {focusedPoint && (
-                 <div 
-                    className="absolute bg-gray-900 dark:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-xl transform -translate-x-1/2 transition-all pointer-events-none z-10"
-                    style={{ left: `${(focusedPoint.x / width) * 100}%`, top: `${(focusedPoint.y / height) * 100}%`, marginTop: '-45px' }}
-                 >
-                     <div className="flex flex-col items-center">
-                         <span>{focusedPoint.value} {activeMetricInfo.unit}</span>
-                         <span className="text-[10px] text-gray-400 font-medium">{new Date(focusedPoint.date).toLocaleDateString(undefined, {month:'short', day:'numeric'})}</span>
-                     </div>
-                     <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
-                 </div>
-             )}
+             {focusedPoint && (() => {
+                 // Smart tooltip positioning to prevent clipping at edges
+                 let translateXClass = "-translate-x-1/2";
+                 let arrowLeftClass = "left-1/2";
+                 
+                 // If point is close to left edge (within 15% of width)
+                 if (focusedPoint.x < width * 0.15) {
+                     translateXClass = "-translate-x-[20%]";
+                     arrowLeftClass = "left-[20%]";
+                 } 
+                 // If point is close to right edge (within 15% of width)
+                 else if (focusedPoint.x > width * 0.85) {
+                     translateXClass = "-translate-x-[80%]";
+                     arrowLeftClass = "left-[80%]";
+                 }
+
+                 return (
+                    <div 
+                        className={`absolute bg-gray-900 dark:bg-gray-700 text-white text-xs font-bold px-3 py-2 rounded-lg shadow-xl transform ${translateXClass} transition-all pointer-events-none z-20 min-w-[110px]`}
+                        style={{ left: `${(focusedPoint.x / width) * 100}%`, top: `${(focusedPoint.y / height) * 100}%`, marginTop: '-55px' }}
+                    >
+                        <div className="flex flex-col items-center text-center">
+                            <span className="text-sm">{focusedPoint.value} <span className="text-xs font-normal text-gray-300">{activeMetricInfo.unit}</span></span>
+                            <span className="text-[10px] text-gray-400 font-medium mt-0.5 whitespace-nowrap">{new Date(focusedPoint.date).toLocaleDateString(undefined, {weekday: 'short', month:'short', day:'numeric'})}</span>
+                        </div>
+                        <div className={`absolute top-full ${arrowLeftClass} -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700`}></div>
+                    </div>
+                 );
+             })()}
         </div>
     );
   };

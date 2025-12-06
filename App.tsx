@@ -60,50 +60,47 @@ export default function App() {
       return () => clearInterval(interval);
   }, []);
 
-  // Auth & Data Init
+  // 1. Auth Listener: Handles initial load and external auth changes
   useEffect(() => {
-    let unsubscribeData: (() => void) | undefined;
-
-    const unsubscribeAuth = authService.onAuthStateChanged(async (firebaseUser) => {
-        if (firebaseUser) {
-            const session: UserSession = {
-                id: firebaseUser.uid,
-                email: firebaseUser.email || '',
-                name: firebaseUser.displayName || 'Beautiful'
+    const unsubscribeAuth = authService.onAuthStateChanged((session: any) => {
+        if (session) {
+            // Normalize User object (Firebase) or UserSession (Local)
+            const mappedUser: UserSession = {
+                id: session.uid || session.id,
+                email: session.email || '',
+                name: session.displayName || session.name || 'Beautiful'
             };
-            setUser(session);
-            
-            // Subscribe to Realtime DB updates for this user
-            unsubscribeData = storageService.subscribeToUserData(session.id, (data) => {
-                setLogs(data.logs);
-                setCycles(data.cycles);
-                setSettings(data.settings);
-            });
-
+            setUser(mappedUser);
         } else {
-            // User logged out
             setUser(null);
-            storageService.clearLocalSession();
-            
-            // Clean up DB listener
-            if (unsubscribeData) {
-                unsubscribeData();
-                unsubscribeData = undefined;
-            }
-            
-            // Reset state
-            setLogs([]);
-            setCycles([]);
         }
         setLoading(false);
     });
 
-    return () => {
-        // Cleanup on App unmount
-        unsubscribeAuth();
-        if (unsubscribeData) unsubscribeData();
-    };
+    return () => unsubscribeAuth();
   }, []);
+
+  // 2. Data Listener: Reacts to User State Changes
+  useEffect(() => {
+      if (!user) {
+          setLogs([]);
+          setCycles([]);
+          // We don't necessarily clear settings here to avoid UI flickering, 
+          // they will be overwritten when a new user logs in or reset by storageService on read.
+          return;
+      }
+
+      // Subscribe to Realtime DB updates for this user
+      const unsubscribeData = storageService.subscribeToUserData(user.id, (data) => {
+          setLogs(data.logs);
+          setCycles(data.cycles);
+          setSettings(data.settings);
+      });
+
+      return () => {
+          unsubscribeData();
+      };
+  }, [user]);
 
   // Theme effect
   useEffect(() => {
@@ -119,7 +116,9 @@ export default function App() {
   };
 
   const handleLogin = (userSession: UserSession) => {
-      // Auth listener handles state updates automatically
+      // Manually set user state to trigger the data listener and view update
+      // This is critical when using the fallback auth mechanism which doesn't trigger the firebase listener
+      setUser(userSession);
   };
 
   const handleLogout = async () => {
@@ -150,11 +149,34 @@ export default function App() {
     showToast("Daily log saved!");
   };
 
-  const handleSaveSettings = (newSettings: UserSettings) => {
-    storageService.saveSettings(newSettings);
-    // Optimistic update
-    setSettings(newSettings);
-    showToast("Settings updated successfully!");
+  const handleSaveSettings = async (newSettings: UserSettings) => {
+    try {
+        // 1. Save Settings (Async to ensure backend sync)
+        await storageService.saveSettings(newSettings);
+        setSettings(newSettings);
+
+        // 2. Update local user state immediately for UI consistency (Display Name)
+        if (user && newSettings.name !== user.name) {
+             const updatedUser = { ...user, name: newSettings.name };
+             setUser(updatedUser);
+        }
+
+        // 3. Re-Analyze Cycles with new configuration
+        // If the user changed the default cycle length, we want the *current* active cycle
+        // (which relies on default length) to update immediately.
+        if (logs.length > 0) {
+            const reanalyzedCycles = analyzeCyclesFromLogs(logs, newSettings.avgCycleLength);
+            if (reanalyzedCycles.length > 0) {
+                const savedCycles = storageService.saveCycles(reanalyzedCycles);
+                setCycles(savedCycles);
+            }
+        }
+        
+        showToast("Settings updated successfully!");
+    } catch (e) {
+        console.error("Failed to save settings:", e);
+        showToast("Failed to save settings", "error");
+    }
   };
 
   const handleClearData = () => {

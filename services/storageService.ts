@@ -1,6 +1,7 @@
 import { Cycle, DailyLog, UserSettings, ChatMessage } from '../types';
 import { db, auth } from './firebase'; 
 import { ref, set, get, child, onValue, off } from "firebase/database";
+import { updateProfile } from "firebase/auth";
 
 // Constants
 const PREFIX = 'flow_index_';
@@ -48,6 +49,11 @@ const getCurrentUserId = (): string | null => {
     return null;
 };
 
+// Helper: Check if user is cloud-enabled
+const isCloudUser = (userId: string | null): boolean => {
+    return !!userId && !userId.startsWith('local_');
+};
+
 export const storageService = {
   
   setActiveUser: (userId: string) => {
@@ -62,6 +68,19 @@ export const storageService = {
   
   subscribeToUserData: (userId: string, callback: (data: any) => void) => {
       storageService.setActiveUser(userId);
+      
+      // If offline/local user, load from LocalStorage immediately and skip Firebase
+      if (!isCloudUser(userId)) {
+          console.log("Offline mode: Skipping cloud sync.");
+          const logs = storageService.getLogs();
+          const cycles = storageService.getCycles();
+          const settings = storageService.getSettings();
+          const chat = storageService.getChatHistory();
+          
+          callback({ logs, cycles, settings, chat });
+          return () => {}; // No-op unsubscribe
+      }
+
       const userRef = ref(db, `users/${userId}`);
       
       const listener = onValue(userRef, (snapshot) => {
@@ -75,7 +94,6 @@ export const storageService = {
               if (data.chat) localStorage.setItem(getLocalKey(KEYS.CHAT, userId), JSON.stringify(data.chat));
               
               // 2. Pass data back to App state
-              // Ensure settings are merged with defaults to prevent missing keys
               const mergedSettings = data.settings ? { ...DEFAULT_SETTINGS, ...data.settings } : DEFAULT_SETTINGS;
 
               callback({
@@ -94,7 +112,13 @@ export const storageService = {
               });
           }
       }, (error) => {
-          console.error("Realtime sync error:", error);
+          console.warn("Realtime sync warning (falling back to local):", error.message);
+          // If permission denied or other error, fallback to local data
+          const logs = storageService.getLogs();
+          const cycles = storageService.getCycles();
+          const settings = storageService.getSettings();
+          const chat = storageService.getChatHistory();
+          callback({ logs, cycles, settings, chat });
       });
 
       return () => off(userRef, 'value', listener);
@@ -123,10 +147,10 @@ export const storageService = {
     const userId = getCurrentUserId();
     localStorage.setItem(getLocalKey(KEYS.LOGS, userId || 'guest'), JSON.stringify(logs));
     
-    // Cloud Save
-    if (userId) {
+    // Cloud Save (Only if cloud user)
+    if (isCloudUser(userId)) {
         set(ref(db, `users/${userId}/logs`), sanitize(logs))
-            .catch(err => console.error("Firebase log save failed:", err));
+            .catch(err => console.warn("Firebase log save skipped/failed:", err.message));
     }
     
     return logs;
@@ -164,9 +188,9 @@ export const storageService = {
     const userId = getCurrentUserId();
     localStorage.setItem(getLocalKey(KEYS.CYCLES, userId || 'guest'), JSON.stringify(cycles));
     
-    if (userId) {
+    if (isCloudUser(userId)) {
         set(ref(db, `users/${userId}/cycles`), sanitize(cycles))
-            .catch(err => console.error("Firebase cycle save failed:", err));
+            .catch(err => console.warn("Firebase cycle save skipped/failed:", err.message));
     }
     return cycles;
   },
@@ -177,9 +201,9 @@ export const storageService = {
       const userId = getCurrentUserId();
       localStorage.setItem(getLocalKey(KEYS.CYCLES, userId || 'guest'), JSON.stringify(sorted));
       
-      if (userId) {
+      if (isCloudUser(userId)) {
           set(ref(db, `users/${userId}/cycles`), sanitize(sorted))
-            .catch(err => console.error("Firebase cycles save failed:", err));
+            .catch(err => console.warn("Firebase cycles save skipped/failed:", err.message));
       }
       return sorted;
   },
@@ -190,32 +214,30 @@ export const storageService = {
     return data ? { ...DEFAULT_SETTINGS, ...JSON.parse(data) } : DEFAULT_SETTINGS;
   },
   
-  saveSettings: (settings: UserSettings) => {
-      // 1. Get current settings to ensure we don't lose fields
+  saveSettings: async (settings: UserSettings): Promise<UserSettings> => {
       const current = storageService.getSettings();
-      
-      // 2. Merge updates
       const updated = { 
           ...current, 
           ...settings,
-          // Explicitly ensure numbers are numbers if they exist
+          // Ensure numbers are numbers
           avgCycleLength: Number(settings.avgCycleLength),
           avgPeriodLength: Number(settings.avgPeriodLength)
       };
       
       const userId = getCurrentUserId();
       
-      // 3. Local Save
+      // 1. Local Save
       localStorage.setItem(getLocalKey(KEYS.SETTINGS, userId || 'guest'), JSON.stringify(updated));
       
-      // 4. Cloud Save
-      if (userId) {
-          console.log("Saving settings to Firebase:", updated);
-          set(ref(db, `users/${userId}/settings`), sanitize(updated))
-            .then(() => console.log("Settings saved successfully."))
-            .catch(err => console.error("Firebase settings save failed:", err));
-      } else {
-          console.warn("No user ID found, settings saved locally only.");
+      // 2. Cloud Save
+      if (isCloudUser(userId)) {
+          // Propagate errors to caller (App.tsx)
+          await set(ref(db, `users/${userId}/settings`), sanitize(updated));
+          
+          // Also update Auth Profile if name changed
+          if (auth.currentUser && settings.name && auth.currentUser.displayName !== settings.name) {
+              await updateProfile(auth.currentUser, { displayName: settings.name });
+          }
       }
       return updated;
   },
@@ -236,9 +258,9 @@ export const storageService = {
       const userId = getCurrentUserId();
       localStorage.setItem(getLocalKey(KEYS.CHAT, userId || 'guest'), JSON.stringify(trimmed));
       
-      if (userId) {
+      if (isCloudUser(userId)) {
           set(ref(db, `users/${userId}/chat`), sanitize(trimmed))
-            .catch(err => console.error("Firebase chat save failed:", err));
+            .catch(err => console.warn("Firebase chat save skipped/failed:", err.message));
       }
   },
 
@@ -249,9 +271,9 @@ export const storageService = {
     
     localKeys.forEach(k => localStorage.removeItem(getLocalKey(k, userId || 'guest')));
     
-    if (userId) {
+    if (isCloudUser(userId)) {
         set(ref(db, `users/${userId}`), null)
-            .catch(err => console.error("Firebase clear failed:", err));
+            .catch(err => console.warn("Firebase clear skipped/failed:", err.message));
     }
   },
 };
